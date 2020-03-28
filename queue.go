@@ -6,11 +6,16 @@ type Job interface {
 
 type Queue struct {
 	jobChan chan Job
+
+	maxWorker  int
+	workerPool chan *worker
 }
 
-func New() *Queue {
+func New(maxWorker int) *Queue {
 	q := &Queue{
-		jobChan: make(chan Job, 1),
+		jobChan:    make(chan Job, 100),
+		maxWorker:  maxWorker,
+		workerPool: make(chan *worker, maxWorker),
 	}
 
 	return q
@@ -21,10 +26,42 @@ func (q *Queue) Dispatch(job Job) {
 }
 
 func (q *Queue) Run() {
+	for i := 0; i < q.maxWorker; i++ {
+		worker := newWorker(q.workerPool)
+		q.workerPool <- worker
+		go worker.start()
+	}
+
 	for {
+		w := <-q.workerPool
+
 		select {
 		case job := <-q.jobChan:
-			_ = job.Handle()
+			w.consume(job)
 		}
 	}
+}
+
+type worker struct {
+	id       int
+	poolChan chan *worker
+	jobChan  chan Job
+}
+
+func newWorker(poolChan chan *worker) *worker {
+	return &worker{poolChan: poolChan, jobChan: make(chan Job, 1)}
+}
+
+func (w *worker) start() {
+	for {
+		select {
+		case job := <-w.jobChan:
+			_ = job.Handle()
+		}
+		w.poolChan <- w
+	}
+}
+
+func (w *worker) consume(job Job) {
+	w.jobChan <- job
 }
