@@ -4,12 +4,22 @@ import (
 	"sync"
 )
 
+// Job define a interface for queue job
 type Job interface {
 	Handle() error
 }
 
+type baseJob struct {
+	Job
+
+	tries    int
+	maxTries int
+}
+
+// Queue use for dispatching a job
 type Queue struct {
-	jobChan chan Job
+	jobChan  chan *baseJob
+	maxTries int
 
 	numWorker  int
 	workerPool chan *worker
@@ -18,9 +28,11 @@ type Queue struct {
 	stoppedChan chan struct{}
 }
 
-func New(numWorker int, maxQueueJob int) *Queue {
+func New(numWorker int, maxQueueJob int, defaultMaxTries int) *Queue {
 	q := &Queue{
-		jobChan:    make(chan Job, maxQueueJob),
+		jobChan:  make(chan *baseJob, maxQueueJob),
+		maxTries: defaultMaxTries,
+
 		numWorker:  numWorker,
 		workerPool: make(chan *worker, numWorker),
 
@@ -31,13 +43,18 @@ func New(numWorker int, maxQueueJob int) *Queue {
 	return q
 }
 
+// Dispatch is for dispatching a job to queue
 func (q *Queue) Dispatch(job Job) {
-	q.jobChan <- job
+	q.jobChan <- &baseJob{
+		Job:      job,
+		tries:    0,
+		maxTries: q.maxTries,
+	}
 }
 
 func (q *Queue) Start() {
 	for i := 0; i < q.numWorker; i++ {
-		worker := newWorker(q.workerPool)
+		worker := newWorker(q)
 		q.workerPool <- worker
 		go worker.start()
 	}
@@ -45,7 +62,11 @@ func (q *Queue) Start() {
 	for {
 		select {
 		case job := <-q.jobChan:
+			if job.tries >= job.maxTries {
+				break
+			}
 			w := <-q.workerPool
+			job.tries++
 			w.consume(job)
 		case <-q.stopChan:
 			wg := new(sync.WaitGroup)
@@ -68,17 +89,26 @@ func (q *Queue) Stop() {
 	<-q.stoppedChan
 }
 
+func (q *Queue) releaseWorker(w *worker) {
+	q.workerPool <- w
+}
+
+func (q *Queue) releaseJob(job Job) {
+	q.jobChan <- job.(*baseJob)
+}
+
+// WORKER
 type worker struct {
-	poolChan chan *worker
-	jobChan  chan Job
+	q       *Queue
+	jobChan chan Job
 
 	stopChan    chan struct{}
 	stoppedChan chan struct{}
 }
 
-func newWorker(poolChan chan *worker) *worker {
+func newWorker(q *Queue) *worker {
 	return &worker{
-		poolChan:    poolChan,
+		q:           q,
 		jobChan:     make(chan Job, 1),
 		stopChan:    make(chan struct{}, 1),
 		stoppedChan: make(chan struct{}, 1),
@@ -89,12 +119,14 @@ func (w *worker) start() {
 	for {
 		select {
 		case job := <-w.jobChan:
-			_ = job.Handle()
+			if err := job.Handle(); err != nil {
+				w.q.releaseJob(job)
+			}
 		case <-w.stopChan:
 			w.stoppedChan <- struct{}{}
 			return
 		}
-		w.poolChan <- w
+		w.q.releaseWorker(w)
 	}
 }
 
