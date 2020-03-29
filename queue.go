@@ -5,9 +5,9 @@ import (
 )
 
 const (
-	DefaultNumWorker   = 5
+	DefaultNumWorker   = 3
 	DefaultMaxQueueJob = 100
-	DefaultMaxTries    = 100
+	DefaultMaxTries    = 3
 )
 
 // Job define a interface for queue job

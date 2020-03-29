@@ -13,41 +13,7 @@ import (
 // TODO: custom max tries per job?
 // TODO: use context for cancellation + timeout?
 // TODO: if timeout: release job back to queue
-
-type mockJob struct {
-	handled chan struct{}
-	sleep   time.Duration
-}
-
-func (j *mockJob) Handle() error {
-	time.Sleep(j.sleep)
-
-	j.handled <- struct{}{}
-	return nil
-}
-
-func (j *mockJob) assertHandleIn(t testing.TB, timeout time.Duration) {
-	select {
-	case <-j.handled:
-		break
-	case <-time.After(timeout):
-		t.Errorf("not handled in %v", timeout)
-	}
-}
-
-func newFastJob() *mockJob {
-	return &mockJob{
-		handled: make(chan struct{}),
-		sleep:   0,
-	}
-}
-
-func newSlowJob(sleep time.Duration) *mockJob {
-	return &mockJob{
-		handled: make(chan struct{}),
-		sleep:   sleep,
-	}
-}
+// TODO: Persistent job???
 
 func newQueueAndRun(numWorker int) *queue.Queue {
 	q := queue.New(
@@ -59,38 +25,135 @@ func newQueueAndRun(numWorker int) *queue.Queue {
 	return q
 }
 
-func TestQueue_Dispatch(t *testing.T) {
-	t.Run("1 fast job", func(t *testing.T) {
-		q := newQueueAndRun(1)
-		j := newFastJob()
+type mockJob struct {
+	wg *sync.WaitGroup
 
-		q.Dispatch(j)
+	handled bool
+	sleep   time.Duration
+}
 
-		j.assertHandleIn(t, time.Second)
+func (j *mockJob) Handle() error {
+	time.Sleep(j.sleep)
+	j.handled = true
+
+	j.wg.Done()
+
+	return nil
+}
+
+func newMockJob(wg *sync.WaitGroup, sleep time.Duration) *mockJob {
+	return &mockJob{wg: wg, handled: false, sleep: sleep}
+}
+
+func (j *mockJob) assertHandled(t testing.TB) {
+	if !j.handled {
+		t.Error("job was not handled")
+	}
+}
+
+func TestHandleJob(t *testing.T) {
+	tests := map[string]struct {
+		numJobs int
+		sleep   time.Duration
+	}{
+		"1 fast job":  {1, 0},
+		"1 slow job":  {1, 10 * time.Millisecond},
+		"10 fast job": {10, 0},
+		"10 slow job": {10, 10 * time.Millisecond},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			// Given
+			q := newQueueAndRun(1)
+			defer q.Stop()
+
+			// When
+			jobs := run(q, test.numJobs, test.sleep)
+
+			// Then
+			for _, j := range jobs {
+				j.assertHandled(t)
+			}
+		})
+	}
+}
+
+func run(q *queue.Queue, numJobs int, sleep time.Duration) []*mockJob {
+	wg := new(sync.WaitGroup)
+
+	var jobs []*mockJob
+	for i := 0; i < numJobs; i++ {
+		wg.Add(1)
+		jobs = append(jobs, newMockJob(wg, sleep))
+		q.Dispatch(jobs[i])
+	}
+
+	wg.Wait()
+
+	return jobs
+}
+
+func Benchmark_1_Worker(b *testing.B) {
+	benchmarkWithNWorker(b, 1)
+}
+
+func Benchmark_5_Worker(b *testing.B) {
+	benchmarkWithNWorker(b, 5)
+}
+
+func Benchmark_10_Worker(b *testing.B) {
+	benchmarkWithNWorker(b, 10)
+}
+
+func benchmarkWithNWorker(b *testing.B, numWorker int) {
+	for n := 0; n < b.N; n++ {
+		q := newQueueAndRun(numWorker)
+
+		jobDuration := 10 * time.Millisecond
+		numJobs := int(time.Second / jobDuration)
+		jobs := run(q, numJobs, jobDuration)
+
+		for _, j := range jobs {
+			j.assertHandled(b)
+		}
+
+		for _, j := range jobs {
+			j.assertHandled(b)
+		}
 
 		q.Stop()
-	})
+	}
+}
 
-	t.Run("1 slow job", func(t *testing.T) {
-		q := newQueueAndRun(1)
-		j := newSlowJob(1 * time.Second)
+func TestStopQueue(t *testing.T) {
+	origin := runtime.NumGoroutine()
 
-		q.Dispatch(j)
+	q := queue.New(queue.WithNumWorker(4))
 
-		j.assertHandleIn(t, 2*time.Second)
-
+	wait := make(chan struct{})
+	time.AfterFunc(time.Second, func() {
 		q.Stop()
+		wait <- struct{}{}
 	})
+	q.Start()
+
+	<-wait
+
+	current := runtime.NumGoroutine()
+	if origin != current {
+		t.Errorf("wanted %d but got %d\n", origin, current)
+	}
 }
 
 type errorJob struct {
-	*waitJob
+	*mockJob
 	numHandled int
 }
 
 func newErrorJob(wg *sync.WaitGroup) *errorJob {
 	return &errorJob{
-		&waitJob{wg: wg},
+		&mockJob{wg: wg},
 		0,
 	}
 }
@@ -140,66 +203,5 @@ func TestReleaseAndMaxTries(t *testing.T) {
 
 			wg.Wait()
 		})
-	}
-}
-
-type waitJob struct {
-	wg *sync.WaitGroup
-}
-
-func (j *waitJob) Handle() error {
-	time.Sleep(10 * time.Millisecond)
-
-	j.wg.Done()
-
-	return nil
-}
-
-func Benchmark_1_Worker(b *testing.B) {
-	benchmarkWithNWorker(b, 1)
-}
-
-func Benchmark_5_Worker(b *testing.B) {
-	benchmarkWithNWorker(b, 5)
-}
-
-func Benchmark_10_Worker(b *testing.B) {
-	benchmarkWithNWorker(b, 10)
-}
-
-func benchmarkWithNWorker(b *testing.B, numWorker int) {
-	for n := 0; n < b.N; n++ {
-		q := newQueueAndRun(numWorker)
-		wg := new(sync.WaitGroup)
-		wg.Add(100)
-
-		for i := 0; i < 100; i++ {
-			j := &waitJob{wg: wg}
-			q.Dispatch(j)
-		}
-
-		wg.Wait()
-
-		q.Stop()
-	}
-}
-
-func TestStopQueue(t *testing.T) {
-	origin := runtime.NumGoroutine()
-
-	q := queue.New(queue.WithNumWorker(4))
-
-	wait := make(chan struct{})
-	time.AfterFunc(time.Second, func() {
-		q.Stop()
-		wait <- struct{}{}
-	})
-	q.Start()
-
-	<-wait
-
-	current := runtime.NumGoroutine()
-	if origin != current {
-		t.Errorf("wanted %d but got %d\n", origin, current)
 	}
 }
