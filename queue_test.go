@@ -2,6 +2,7 @@ package queue_test
 
 import (
 	"queue"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -43,15 +44,14 @@ func newSlowJob(sleep time.Duration) *mockJob {
 }
 
 func newQueueAndRun(maxWorker int) *queue.Queue {
-	q := queue.New(maxWorker)
-	go q.Run()
+	q := queue.New(maxWorker, 100)
+	go q.Start()
 
 	return q
 }
 
 func TestQueue_Dispatch(t *testing.T) {
 	t.Run("1 fast job", func(t *testing.T) {
-		t.Parallel()
 		q := newQueueAndRun(1)
 		j := newFastJob()
 
@@ -61,7 +61,6 @@ func TestQueue_Dispatch(t *testing.T) {
 	})
 
 	t.Run("10 fast job", func(t *testing.T) {
-		t.Parallel()
 		q := newQueueAndRun(1)
 		j := newFastJob()
 
@@ -72,7 +71,6 @@ func TestQueue_Dispatch(t *testing.T) {
 	})
 
 	t.Run("1 slow job", func(t *testing.T) {
-		t.Parallel()
 		q := newQueueAndRun(1)
 		j := newSlowJob(1 * time.Second)
 
@@ -82,7 +80,6 @@ func TestQueue_Dispatch(t *testing.T) {
 	})
 
 	t.Run("10 fast job with 5 worker", func(t *testing.T) {
-		t.Parallel()
 		q := newQueueAndRun(5)
 		j := newSlowJob(10 * time.Millisecond)
 
@@ -148,5 +145,25 @@ func Benchmark_10_Worker(b *testing.B) {
 		}
 
 		wg.Wait()
+	}
+}
+
+func TestStopQueue(t *testing.T) {
+	origin := runtime.NumGoroutine()
+
+	q := queue.New(4, 100)
+
+	wait := make(chan struct{})
+	time.AfterFunc(time.Second, func() {
+		q.Stop()
+		wait <- struct{}{}
+	})
+	q.Start()
+
+	<-wait
+
+	current := runtime.NumGoroutine()
+	if origin != current {
+		t.Errorf("wanted %d but got %d\n", origin, current)
 	}
 }
