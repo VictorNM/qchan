@@ -1,9 +1,9 @@
-package queue_test
+package qchan_test
 
 import (
 	"errors"
 	"fmt"
-	"queue"
+	"github.com/victornm/qchan"
 	"runtime"
 	"sync"
 	"testing"
@@ -15,9 +15,9 @@ import (
 // TODO: if timeout: release job back to queue
 // TODO: Persistent job???
 
-func newQueueAndRun(numWorker int) *queue.Queue {
-	q := queue.New(
-		queue.WithNumWorker(numWorker),
+func newQueueAndRun(numWorker int) *qchan.Queue {
+	q := qchan.New(
+		qchan.WithNumWorker(numWorker),
 	)
 
 	go q.Start()
@@ -79,7 +79,7 @@ func TestHandleJob(t *testing.T) {
 	}
 }
 
-func run(q *queue.Queue, numJobs int, sleep time.Duration) []*mockJob {
+func run(q *qchan.Queue, numJobs int, sleep time.Duration) []*mockJob {
 	wg := new(sync.WaitGroup)
 
 	var jobs []*mockJob
@@ -129,7 +129,7 @@ func benchmarkWithNWorker(b *testing.B, numWorker int) {
 func TestStopQueue(t *testing.T) {
 	origin := runtime.NumGoroutine()
 
-	q := queue.New(queue.WithNumWorker(4))
+	q := qchan.New(qchan.WithNumWorker(4))
 
 	wait := make(chan struct{})
 	time.AfterFunc(time.Second, func() {
@@ -190,7 +190,7 @@ func TestReleaseAndMaxTries(t *testing.T) {
 			test.numWorker,
 		)
 		t.Run(name, func(t *testing.T) {
-			q := queue.New(queue.WithNumWorker(test.numWorker), queue.WithMaxTries(test.maxTries))
+			q := qchan.New(qchan.WithNumWorker(test.numWorker), qchan.WithDefaultMaxTries(test.maxTries))
 			go q.Start()
 			defer q.Stop()
 

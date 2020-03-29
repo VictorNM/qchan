@@ -1,4 +1,4 @@
-package queue
+package qchan
 
 import (
 	"sync"
@@ -53,11 +53,11 @@ func WithMaxQueueJob(n int) Option {
 	}
 }
 
-// WithMaxTries specify the max number of tries before discard a job
+// WithDefaultMaxTries specify the max number of tries before discard a job
 // When an error returned from method Handle(), the job will be release back to queue,
 // then the number of tries will increase by 1
 // After the max number of tries is reach, the job will be discard
-func WithMaxTries(n int) Option {
+func WithDefaultMaxTries(n int) Option {
 	return func(q *Queue) {
 		q.maxTries = n
 	}
