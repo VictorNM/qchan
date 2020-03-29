@@ -4,6 +4,12 @@ import (
 	"sync"
 )
 
+const (
+	DefaultNumWorker   = 5
+	DefaultMaxQueueJob = 100
+	DefaultMaxTries    = 100
+)
+
 // Job define a interface for queue job
 type Job interface {
 	Handle() error
@@ -18,8 +24,9 @@ type baseJob struct {
 
 // Queue use for dispatching a job
 type Queue struct {
-	jobChan  chan *baseJob
-	maxTries int
+	maxQueueJob int
+	jobChan     chan *baseJob
+	maxTries    int
 
 	numWorker  int
 	workerPool chan *worker
@@ -28,17 +35,49 @@ type Queue struct {
 	stoppedChan chan struct{}
 }
 
-func New(numWorker int, maxQueueJob int, defaultMaxTries int) *Queue {
-	q := &Queue{
-		jobChan:  make(chan *baseJob, maxQueueJob),
-		maxTries: defaultMaxTries,
+type Option func(q *Queue)
 
-		numWorker:  numWorker,
-		workerPool: make(chan *worker, numWorker),
+// WithNumWorker specify the number of workers for queue
+func WithNumWorker(n int) Option {
+	return func(q *Queue) {
+		q.numWorker = n
+	}
+}
+
+// WithMaxQueueJob specify the capacity of the queue
+func WithMaxQueueJob(n int) Option {
+	return func(q *Queue) {
+		q.maxQueueJob = n
+	}
+}
+
+// WithMaxTries specify the max number of tries before discard a job
+// When an error returned from method Handle(), the job will be release back to queue,
+// then the number of tries will increase by 1
+// After the max number of tries is reach, the job will be discard
+func WithMaxTries(n int) Option {
+	return func(q *Queue) {
+		q.maxTries = n
+	}
+}
+
+func New(options ...Option) *Queue {
+	q := &Queue{
+		maxQueueJob: DefaultMaxQueueJob,
+		maxTries:    DefaultMaxTries,
+
+		numWorker: DefaultNumWorker,
 
 		stopChan:    make(chan struct{}, 1),
 		stoppedChan: make(chan struct{}, 1),
 	}
+
+	for _, option := range options {
+		option(q)
+	}
+
+	q.jobChan = make(chan *baseJob, q.maxQueueJob)
+	q.workerPool = make(chan *worker, q.numWorker)
 
 	return q
 }
@@ -72,7 +111,7 @@ func (q *Queue) Start() {
 			wg := new(sync.WaitGroup)
 			wg.Add(q.numWorker)
 
-			for i := 0; i < q.numWorker; i++ {
+			for i := 0; i < cap(q.workerPool); i++ {
 				w := <-q.workerPool
 				w.stop(wg)
 			}

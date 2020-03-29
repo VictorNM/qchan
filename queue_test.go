@@ -11,6 +11,7 @@ import (
 )
 
 // TODO: custom max tries per job?
+// TODO: use context for cancellation + timeout?
 // TODO: if timeout: release job back to queue
 
 type mockJob struct {
@@ -49,7 +50,9 @@ func newSlowJob(sleep time.Duration) *mockJob {
 }
 
 func newQueueAndRun(numWorker int) *queue.Queue {
-	q := queue.New(numWorker, 100, 1)
+	q := queue.New(
+		queue.WithNumWorker(numWorker),
+	)
 
 	go q.Start()
 
@@ -124,7 +127,7 @@ func TestReleaseAndMaxTries(t *testing.T) {
 			test.numWorker,
 		)
 		t.Run(name, func(t *testing.T) {
-			q := queue.New(test.numWorker, 10, test.maxTries)
+			q := queue.New(queue.WithNumWorker(test.numWorker), queue.WithMaxTries(test.maxTries))
 			go q.Start()
 			defer q.Stop()
 
@@ -184,7 +187,7 @@ func benchmarkWithNWorker(b *testing.B, numWorker int) {
 func TestStopQueue(t *testing.T) {
 	origin := runtime.NumGoroutine()
 
-	q := queue.New(4, 100, 1)
+	q := queue.New(queue.WithNumWorker(4))
 
 	wait := make(chan struct{})
 	time.AfterFunc(time.Second, func() {
