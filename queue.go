@@ -15,6 +15,8 @@ type Job interface {
 	Handle() error
 }
 
+// baseJob wrap a Job with some internal field for tracking job
+// Currently include field to support feature retry a job
 type baseJob struct {
 	Job
 
