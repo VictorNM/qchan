@@ -12,8 +12,6 @@ A simple queue - worker using Go channel
 
 ### Usage example
 
-What things you need to install the software and how to install them
-
 ```go
 package main
 
@@ -22,6 +20,14 @@ import (
 	"github.com/victornm/qchan"
 	"time"
 )
+
+type PrintHello struct {
+}
+
+func (j *PrintHello) Handle() error {
+	fmt.Println("hello")
+	return nil
+}
 
 func main() {
 	q := qchan.New()

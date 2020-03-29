@@ -118,10 +118,6 @@ func benchmarkWithNWorker(b *testing.B, numWorker int) {
 			j.assertHandled(b)
 		}
 
-		for _, j := range jobs {
-			j.assertHandled(b)
-		}
-
 		q.Stop()
 	}
 }
