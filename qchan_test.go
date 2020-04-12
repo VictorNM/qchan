@@ -94,25 +94,42 @@ func run(q *qchan.Queue, numJobs int, sleep time.Duration) []*mockJob {
 	return jobs
 }
 
+type config struct {
+	numJobs     int
+	jobDuration time.Duration
+
+	numWorkers int
+}
+
+func littleJob(numWorkers int) *config {
+	return &config{
+		numJobs:     100,
+		jobDuration: 10 * time.Millisecond,
+		numWorkers:  numWorkers,
+	}
+}
+
 func Benchmark_1_Worker(b *testing.B) {
-	benchmarkWithNWorker(b, 1)
+	benchmarkWithQueue(b, littleJob(1))
 }
 
 func Benchmark_5_Worker(b *testing.B) {
-	benchmarkWithNWorker(b, 5)
+	benchmarkWithQueue(b, littleJob(5))
 }
 
 func Benchmark_10_Worker(b *testing.B) {
-	benchmarkWithNWorker(b, 10)
+	benchmarkWithQueue(b, littleJob(10))
 }
 
-func benchmarkWithNWorker(b *testing.B, numWorker int) {
-	for n := 0; n < b.N; n++ {
-		q := newQueueAndRun(numWorker)
+func Benchmark_10000_Worker(b *testing.B) {
+	benchmarkWithQueue(b, littleJob(10000))
+}
 
-		jobDuration := 10 * time.Millisecond
-		numJobs := int(time.Second / jobDuration)
-		jobs := run(q, numJobs, jobDuration)
+func benchmarkWithQueue(b *testing.B, c *config) {
+	for n := 0; n < b.N; n++ {
+		q := newQueueAndRun(c.numWorkers)
+
+		jobs := run(q, c.numJobs, c.jobDuration)
 
 		for _, j := range jobs {
 			j.assertHandled(b)

@@ -111,9 +111,9 @@ func (q *Queue) Start() {
 			w.consume(job)
 		case <-q.stopChan:
 			wg := new(sync.WaitGroup)
-			wg.Add(q.numWorker)
 
 			for i := 0; i < cap(q.workerPool); i++ {
+				wg.Add(1)
 				w := <-q.workerPool
 				w.stop(wg)
 			}
