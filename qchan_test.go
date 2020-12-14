@@ -3,11 +3,12 @@ package qchan_test
 import (
 	"errors"
 	"fmt"
-	"github.com/victornm/qchan"
 	"runtime"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/victornm/qchan"
 )
 
 // TODO: custom max tries per job?
